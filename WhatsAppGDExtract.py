@@ -21,6 +21,7 @@ import os
 import requests
 import sys
 import traceback
+import tqdm
 
 def human_size(size):
     for s in ["B", "kiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"]:
@@ -126,6 +127,8 @@ class WaBackup:
         return name, int(file["sizeBytes"]), md5Hash
 
     def fetch_all(self, backup, cksums):
+        pBar = tqdm.tqdm(total=int(backup["sizeBytes"]), unit="B", unit_scale=True, unit_divisor=1024, leave=True)
+        
         num_files = 0
         total_size = 0
         with ThreadPool(10) as pool:
@@ -136,14 +139,7 @@ class WaBackup:
             for name, size, md5Hash in downloads:
                 num_files += 1
                 total_size += size
-                print(
-                    "\rProgress: {:7.3f}% {:60}".format(
-                        100 * total_size / int(backup["sizeBytes"]),
-                        os.path.basename(name)[-60:]
-                    ),
-                    end="",
-                    flush=True,
-                )
+                pBar.update(size)
 
                 cksums.write("{md5Hash} *{name}\n".format(
                     name=name,

@@ -1,2 +1,3 @@
 gpsoauth==2.0
 urllib3<2
+tqdm
