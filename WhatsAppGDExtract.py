@@ -13,7 +13,9 @@ from base64 import b64decode
 from getpass import getpass
 from multiprocessing.pool import ThreadPool
 from textwrap import dedent
+from urllib.parse import quote
 import configparser
+import errno
 import gpsoauth
 import hashlib
 import json
@@ -46,13 +48,19 @@ def have_file(file, size, md5):
 
     return md5 == digest.digest()
 
-def download_file(file, stream):
+def escape_non_ascii(name):
     """
-    Download a file from the given stream.
+    Replace non-ASCII characters with their percent-encoded UTF-8 bytes.
+    """
+    return "".join(c if c.isascii() else quote(c) for c in name)
+
+def download_file(file, get_stream):
+    """
+    Download a file from the stream returned by get_stream.
     """
     os.makedirs(os.path.dirname(file), exist_ok=True)
     with open(file, "bw") as dest:
-        for chunk in stream.iter_content(chunk_size=None):
+        for chunk in get_stream().iter_content(chunk_size=None):
             dest.write(chunk)
 
 class WaBackup:
@@ -116,14 +124,23 @@ class WaBackup:
 
     def fetch(self, file):
         name = os.path.sep.join(file["name"].split("/")[3:])
+        size = int(file["sizeBytes"])
         md5Hash = b64decode(file["md5Hash"], validate=True)
-        if not have_file(name, int(file["sizeBytes"]), md5Hash):
-            download_file(
-                name,
-                self.get(file["name"].replace("%", "%25").replace("+", "%2B"), {"alt": "media"}, stream=True)
-            )
+        get_stream = lambda: self.get(
+            file["name"].replace("%", "%25").replace("+", "%2B"), {"alt": "media"}, stream=True
+        )
+        try:
+            if not have_file(name, size, md5Hash):
+                download_file(name, get_stream)
+        except OSError as e:
+            if e.errno != errno.EILSEQ:
+                raise
+            # The filesystem rejected the name, e.g. macOS with an emoji it doesn't support.
+            name = escape_non_ascii(name)
+            if not have_file(name, size, md5Hash):
+                download_file(name, get_stream)
 
-        return name, int(file["sizeBytes"]), md5Hash
+        return name, size, md5Hash
 
     def fetch_all(self, backup, cksums):
         num_files = 0
